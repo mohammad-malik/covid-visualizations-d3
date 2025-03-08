@@ -14,6 +14,8 @@ This project aims to provide an interactive and informative dashboard for visual
 4. **Hierarchical Tree Map:** A tree map showing the number of confirmed cases in regions (province and cities).
 5. **Sunburst Chart:** Represents hierarchical data of COVID-19 cases in different age groups and genders.
 
+![dashboard](https://github.com/user-attachments/assets/8f126ff4-56bb-46da-947e-fb42b0ad1fb4)
+
 ## Features
 
 * Interactive D3.js visualizations
