@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Covid Timeline</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Styling for the body and basic structure */
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        /* Styling for the SVG canvas */
+        svg {
+            display: block;
+            margin: auto;
+            background-color: #f9f9f9;
+            border: 1px solid #ccc;
+        }
+        /* Styling for different line categories */
+        .line {
+            fill: none;
+            stroke-width: 2px;
+        }
+        .line.confirmed {
+            stroke: orange;
+        }
+        .line.released {
+            stroke: green;
+        }
+        .line.deceased {
+            stroke: red;
+        }
+        /* Styling for the tooltip */
+        .tooltip {
+            position: absolute;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 5px;
+            pointer-events: none;
+            display: none;
+            font-size: 12px;
+            color: black;
+        }
+        /* Styling for control buttons */
+        .buttons {
+            margin: 20px 0;
+        }
+        .buttons button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .buttons button.active {
+            background-color: #f1f1f1;
+            border-color: #888;
+        }
+        .buttons button:hover {
+            background-color: #ddd;
+        }
+        /* Styling for category labels (Confirmed, Released, Deceased) */
+        .labels {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+        }
+        .labels span {
+            padding: 10px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        .labels .confirmed {
+            background-color: rgb(248, 189, 26);
+            color: white;
+        }
+        .labels .released {
+            background-color: green;
+            color: white;
+        }
+        .labels .deceased {
+            background-color: red;
+            color: white;
+        }
+        .labels span:hover {
+            opacity: 0.7;
+        }
+        /* Highlight active label */
+        .labels span.active {
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            transform: scale(1.05);
+        }
+        /* Slider container for the progress bar */
+        .slider-container {
+            margin: 20px auto;
+            width: 80%;
+            text-align: center;
+        }
+        /* Styling for the progress slider */
+        input[type="range"] {
+            width: 100%;
+            height: 15px;
+            background: #f1f1f1;
+            border-radius: 5px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            width: 20px;
+            height: 20px;
+            background: red; /* Custom thumb color */
+            border-radius: 50%;
+            cursor: pointer;
+            position: relative;
+            z-index: 2;
+        }
+        /* Customizing slider background */
+        input[type="range"] {
+            background: #f1f1f1;
+        }
+        /* Expanded hitbox for easier interaction with lines */
+        .line-hitbox {
+            fill: none;
+            stroke: transparent;
+            stroke-width: 30px; /* Increased width for better interaction */
+            cursor: pointer;
+        }
+        /* Circle for hover effect */
+        .hover-circle {
+            display: none;
+            fill: white;
+            stroke-width: 2px;
+            r: 5; /* ignore the warning it is radius and it does work */    
+        }
+        /* Styling for axis labels */
+        .axis-label {
+            font-size: 12px;
+            fill: #666;
+        }
+    </style>
+    <script>
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'download' && event.data.visualization === 'timeline') {
+                const svg = document.querySelector('svg');
+                
+                if (event.data.format === 'svg') {
+                    // Download as SVG
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = URL.createObjectURL(svgBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `covid19_timeline.svg`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else {
+                    // Download as PNG or JPEG
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const DOMURL = window.URL || window.webkitURL || window;
+                    const img = new Image();
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = DOMURL.createObjectURL(svgBlob);
+                    
+                    img.onload = function() {
+                        canvas.width = svg.getBoundingClientRect().width;
+                        canvas.height = svg.getBoundingClientRect().height;
+                        
+                        // For JPEG, fill white background
+                        if (event.data.format === 'jpeg') {
+                            ctx.fillStyle = 'white';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        }
+                        
+                        ctx.drawImage(img, 0, 0);
+                        DOMURL.revokeObjectURL(url);
+                        
+                        const imgUrl = canvas.toDataURL(`image/${event.data.format}`);
+                        const a = document.createElement('a');
+                        a.href = imgUrl;
+                        a.download = `covid19_timeline.${event.data.format}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    };
+                    img.src = url;
+                }
+            }
+        });
+    </script>
+</head>
+<body>    
+    <!-- Control buttons for play/pause functionality -->
+    <div class="buttons">
+        <button id="playPauseButton">Start</button>
+    </div>
+
+    <!-- Slider for controlling animation progress -->
+    <div class="slider-container">
+        <input type="range" id="progressSlider" value="0" max="100" step="1">
+    </div>
+
+    <!-- SVG container for the chart -->
+    <svg width="900" height="500"></svg>
+    <!-- Tooltip for displaying data on hover -->
+    <div class="tooltip" id="tooltip"></div>
+
+    <!-- Labels for toggling different data categories -->
+    <div class="labels">
+        <span class="confirmed">Confirmed</span>
+        <span class="released">Released</span>
+        <span class="deceased">Deceased</span>
+    </div>
+
+    <script>
+        // Set up chart dimensions and margins
+        const width = 900;
+        const height = 500;
+        const margin = { top: 20, right: 50, bottom: 50, left: 60 };
+
+        // Select SVG, tooltip, and progress slider elements
+        const svg = d3.select("svg");
+        const tooltip = d3.select("#tooltip");
+        const progressSlider = d3.select("#progressSlider");
+
+        // Initialize slider background gradient
+        progressSlider.node().style.background = `linear-gradient(to right, red 0%, red 0%, #f1f1f1 0%, #f1f1f1 100%)`;
+
+        // Load COVID data from CSV
+        d3.csv("covid_proj_dataset.csv", d => ({
+            date: new Date(d.confirmed_date),
+            confirmed: +d.confirmed || 0,
+            released: +d.released || 0,
+            deceased: +d.deceased || 0
+        })).then(data => {
+            // Filter data to include entries after a specified date
+            const startDate = new Date("2020-03-15");
+            data = data.filter(d => d.date >= startDate); 
+
+            // Sort data by date
+            data.sort((a, b) => a.date - b.date);
+
+            // Set up x (time) and y (log value) scales
+            const xScale = d3.scaleTime()
+                .domain(d3.extent(data, d => d.date))
+                .range([margin.left, width - margin.right]);
+
+            const yScale = d3.scaleLog()
+                .domain([1, d3.max(data, d => Math.max(d.confirmed, d.released, d.deceased))])
+                .nice()
+                .range([height - margin.bottom, margin.top]);
+
+            // Add x-axis to the chart
+            svg.append("g")
+                .attr("transform", `translate(0,${height - margin.bottom})`)
+                .call(d3.axisBottom(xScale));
+
+            // Add y-axis with log scale
+            svg.append("g")
+                .attr("transform", `translate(${margin.left},0)`)
+                .call(d3.axisLeft(yScale)
+                    .tickValues([1, 10, 100, 1000, 10000, 100000]) // Fixed tick values
+                    .tickFormat(d3.format(","))); // Format tick values with commas
+
+            // Add x-axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("x", width / 2)
+                .attr("y", height - 10)
+                .style("text-anchor", "middle")
+                .text("Date");
+
+            // Add y-axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -height / 2)
+                .attr("y", 15)
+                .style("text-anchor", "middle")
+                .text("Number of Cases (Log Scale)");
+
+            // Line generator for each category
+            const line = d3.line()
+                .x(d => xScale(d.date))
+                .y(d => yScale(Math.max(1, d.value))) // Ensure minimum y-value for log scale
+                .defined(d => d.value > 0); // Ignore zero values
+
+            // Define categories and their colors
+            const categories = [
+                { name: "confirmed", color: "orange" },
+                { name: "released", color: "green" },
+                { name: "deceased", color: "red" }
+            ];
+
+            // Create a group for each category's line, hitbox, and hover effects
+            const lines = categories.map(category => {
+                const group = svg.append("g");
+                
+                // Main line
+                const path = group.append("path")
+                    .datum(data.map(d => ({ date: d.date, value: d[category.name] })))
+                    .attr("class", `line ${category.name}`)
+                    .attr("stroke", category.color)
+                    .attr("fill", "none")
+                    .attr("d", line);
+
+                // Transparent hitbox for easier hover interaction
+                const hitbox = group.append("path")
+                    .datum(data.map(d => ({ date: d.date, value: d[category.name] })))
+                    .attr("class", "line-hitbox")
+                    .attr("d", line);
+
+                // Circle to indicate hover position
+                const hoverCircle = group.append("circle")
+                    .attr("class", "hover-circle")
+                    .attr("stroke", category.color);
+
+                return { path, hitbox, hoverCircle, group };
+            });
+
+            // Initialize play/pause state and setup button behavior
+            let isPlaying = false;
+            d3.select("#playPauseButton").on("click", function() {
+                isPlaying = !isPlaying;
+                if (isPlaying) {
+                    this.textContent = "Pause";
+                    animateLines();
+                } else {
+                    this.textContent = "Start";
+                    pauseAnimation();
+                }
+            });
+
+            // Function to animate lines over time
+            function animateLines() {
+                const duration = 7000; // Total duration in milliseconds
+                const startTime = Date.now();
+                
+                // Reset progress slider
+                progressSlider.node().value = 0;
+                progressSlider.node().style.background = `linear-gradient(to right, red 0%, red 0%, #f1f1f1 0%, #f1f1f1 100%)`;
+            
+                // Setup initial line state
+                lines.forEach((line) => {
+                    const totalLength = line.path.node().getTotalLength();
+                    line.path
+                        .attr("stroke-dasharray", `${totalLength} ${totalLength}`)
+                        .attr("stroke-dashoffset", totalLength);
+                });
+            
+                // Animation loop
+                function animate() {
+                    if (!isPlaying) return;
+            
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    
+                    // Update progress slider
+                    progressSlider.node().value = progress * 100;
+                    progressSlider.node().style.background = `linear-gradient(to right, red 0%, red ${progress * 100}%, #f1f1f1 ${progress * 100}%, #f1f1f1 100%)`;
+            
+                    // Update lines
+                    lines.forEach((line) => {
+                        const totalLength = line.path.node().getTotalLength();
+                        line.path.attr("stroke-dashoffset", totalLength * (1 - progress));
+                    });
+            
+                    // Continue animation or end
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        isPlaying = false;
+                        d3.select("#playPauseButton").text("Start");
+                    }
+                }
+            
+                // Start animation loop
+                requestAnimationFrame(animate);
+            }
+
+            // Pause animation by stopping transitions
+            function pauseAnimation() {
+                isPlaying = false;
+            }
+
+            // Handle slider input to manually control animation progress
+            progressSlider.on("input", function() {
+                const sliderValue = this.value;
+                isPlaying = false;
+                d3.select("#playPauseButton").text("Start");
+                this.style.background = `linear-gradient(to right, red 0%, red ${sliderValue}%, #f1f1f1 ${sliderValue}%, #f1f1f1 100%)`;
+                lines.forEach((line) => {
+                    const totalLength = line.path.node().getTotalLength();
+                    line.path.transition().duration(0)
+                        .attr("stroke-dasharray", `${totalLength} ${totalLength}`)
+                        .attr("stroke-dashoffset", totalLength - (totalLength * (sliderValue / 100)));
+                });
+            });
+
+            // Hover interaction for lines
+            lines.forEach((line, index) => {
+                line.hitbox.on("mouseover", function(event) {
+                    lines.forEach(otherLine => {
+                        if (otherLine !== line) {
+                            otherLine.path.style("stroke", "grey").style("opacity", 0.3);
+                            otherLine.hoverCircle.style("display", "none");
+                        }
+                    });
+
+                    line.path.style("opacity", 1);
+                }).on("mousemove", function(event) {
+                    const mouseX = d3.pointer(event)[0];
+                    const closestData = getClosestDataPoint(mouseX, index);
+                    line.hoverCircle
+                        .style("display", "block")
+                        .transition()
+                        .duration(50)
+                        .ease(d3.easeLinear)
+                        .attr("cx", xScale(closestData.date))
+                        .attr("cy", yScale(Math.max(1, closestData.value)));
+                    tooltip.style("display", "block")
+                        .html(`Cases: ${d3.format(",")(closestData.value)}`)
+                        .style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY - 28}px`);
+                }).on("mouseout", function() {
+                    lines.forEach(otherLine => {
+                        otherLine.path.style("stroke", function() {
+                            const category = otherLine.path.attr("class").split(" ")[1];
+                            if (category === "confirmed") return "orange";
+                            if (category === "released") return "green";
+                            return "red";
+                        }).style("opacity", 1);
+                        otherLine.hoverCircle.style("display", "none");
+                    });
+                    tooltip.style("display", "none");
+                });
+            });
+
+            // Function to find the closest data point for the hovered position
+            const bisectDate = d3.bisector(d => d.date).left;
+
+            function getClosestDataPoint(mouseX, lineIndex) {
+                const currentData = data.map(d => ({
+                    date: d.date,
+                    value: d[categories[lineIndex].name]
+                }));
+                const x0 = xScale.invert(mouseX);
+                const i = bisectDate(currentData, x0, 1);
+                const d0 = currentData[i - 1];
+                const d1 = currentData[i];
+                if (!d0 || !d1) return d0 || d1;
+                const range = d1.date - d0.date;
+                const progress = (x0 - d0.date) / range;
+                const interpolatedValue = d0.value + (d1.value - d0.value) * progress;
+                return { date: x0, value: Math.round(interpolatedValue), x: mouseX };
+            }
+
+            // Event handlers for label interaction
+            let activeLabel = null;
+            d3.selectAll(".labels span").on("click", function() {
+                const clickedLabel = d3.select(this);
+                const selectedCategory = clickedLabel.attr("class").split(' ')[0];
+                const selectedLine = lines.find(line => 
+                    line.path.attr("class").includes(selectedCategory));
+                if (activeLabel === this) {
+                    activeLabel = null;
+                    clickedLabel.classed("active", false);
+                    lines.forEach(line => {
+                        line.path.style("stroke", function() {
+                            const category = line.path.attr("class").split(" ")[1];
+                            if (category === "confirmed") return "orange";
+                            if (category === "released") return "green";
+                            if (category === "deceased") return "red";
+                        }).style("opacity", 1);
+                    });
+                } else {
+                    if (activeLabel) {
+                        d3.select(activeLabel).classed("active", false);
+                    }
+                    activeLabel = this;
+                    clickedLabel.classed("active", true);
+                    lines.forEach(line => {
+                        if (line !== selectedLine) {
+                            line.path.style("stroke", "grey").style("opacity", 0.3);
+                        } else {
+                            line.path.style("stroke", function() {
+                                if (selectedCategory === "confirmed") return "orange";
+                                if (selectedCategory === "released") return "green";
+                                if (selectedCategory === "deceased") return "red";
+                            }).style("opacity", 1);
+                        }
+                    });
+                }
+            });
+
+            d3.selectAll(".labels span").on("mouseover", function() {
+                if (!activeLabel) {
+                    const selectedCategory = d3.select(this).attr("class").split(' ')[0];
+                    const selectedLine = lines.find(line => line.path.attr("class").includes(selectedCategory));
+                    lines.forEach(line => {
+                        if (line !== selectedLine) {
+                            line.path.style("stroke", "grey").style("opacity", 0.3);
+                        }
+                    });
+                    selectedLine.path.style("opacity", 1);
+                }
+            }).on("mouseout", function() {
+                if (!activeLabel) {
+                    lines.forEach(line => {
+                        line.path.style("stroke", function() {
+                            const category = line.path.attr("class").split(" ")[1];
+                            if (category === "confirmed") return "orange";
+                            if (category === "released") return "green";
+                            return "red";
+                        }).style("opacity", 1);
+                    });
+                }
+            });
+
+        }).catch(err => console.error("Error loading the dataset:", err));
+    </script>
+</body>
+</html>

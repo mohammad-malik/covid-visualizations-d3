@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COVID-19 Korea Dashboard</title>
+    <style>
+        /* General Styles for the Dashboard */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #ffffff;
+        }
+
+        header {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            text-align: center;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 2em;
+        }
+
+        main {
+            display: flex;
+            flex-wrap: wrap;
+            padding: 20px;
+            gap: 20px;
+            justify-content: center;
+            background-color: #f9f9f9;
+        }
+
+        section {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 15px;
+            flex: 1 1 300px;
+            max-width: 1000px;
+        }
+
+        section h2 {
+            margin-top: 0;
+            color: #34495e;
+            font-size: 1.5em;
+            text-align: center;
+        }
+
+        section p.description {
+            font-size: 1.1em;  /* Increased from 0.9em */
+            line-height: 1.4;  /* Added for better readability */
+            color: #555;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        iframe {
+            width: 100%;
+            height: 800px;
+            border: none;
+            border-radius: 4px;
+        }
+
+        .download-btn {
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+            transition: background-color 0.3s;
+        }
+
+        .download-btn:hover {
+            background-color: #34495e;
+        }
+
+        .btn-container {
+            text-align: right;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .format-select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #2c3e50;
+            background-color: white;
+            color: #2c3e50;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- Dashboard Header -->
+    <header>
+        <h1>COVID-19 Korea Dashboard</h1>
+        <p>Comprehensive Visualizations of COVID-19 Data in South Korea</p>
+    </header>
+
+    <!-- Dashboard Main Content -->
+    <main>
+        <!-- Container for top sections -->
+        <div style="display: flex; width: 100%; gap: 20px;">
+            <!-- Map Section -->
+            <section style="flex: 1.4; max-width: none;">
+                <h2>Map of Cases by Province and Exact Location</h2>
+                <div class="btn-container">
+                    <select class="format-select" id="map-format">
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
+                        <option value="svg">SVG</option>
+                    </select>
+                    <button class="download-btn" onclick="downloadVisualization('map')">Download</button>
+                </div>
+                <p class="description">
+                    This map provides a geographical representation of COVID-19 cases across South Korea, pinpointing exact locations with latitude and longitude coordinates.<br>
+                    Use the controls and legend to filter and explore the data interactively.
+                </p>
+                <iframe id="map-frame" src="map.html" title="Map of COVID-19 Cases in South Korea"></iframe>
+            </section>
+
+            <!-- Sunburst Chart Section -->
+            <section style="flex: 1; max-width: none;">
+                <h2>Sunburst Chart of Cases by Age Group, Gender, and Infection Case</h2>
+                <div class="btn-container">
+                    <select class="format-select" id="sunburst-format">
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
+                        <option value="svg">SVG</option>
+                    </select>
+                    <button class="download-btn" onclick="downloadVisualization('sunburst')">Download</button>
+                </div>
+                <p class="description">
+                    Explore the breakdown of COVID-19 cases in South Korea by age groups, gender, and specific infection cases using this interactive sunburst chart.<br>
+                    Click on segments to drill down into more detailed layers of the data.
+                </p>
+                <iframe id="sunburst-frame" src="sunburst.html" title="Sunburst Chart of COVID-19 Cases by Demographics"></iframe>
+            </section>
+        </div>
+
+        <!-- Container for bottom sections -->
+        <div style="display: flex; width: 100%; gap: 20px;">
+            <!-- Treemap Section -->
+            <section style="flex: 1.4; max-width: none;">
+                <h2>Hierarchical Tree Map of Cases by Cities and Provinces</h2>
+                <div class="btn-container">
+                    <select class="format-select" id="treemap-format">
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
+                        <option value="svg">SVG</option>
+                    </select>
+                    <button class="download-btn" onclick="downloadVisualization('treemap')">Download</button>
+                </div>
+                <p class="description">
+                    This treemap visualizes the distribution of confirmed COVID-19 cases across various cities and provinces in South Korea.<br>
+                    Hover over the rectangles to see detailed information, and use the breadcrumb navigation to explore different levels of the hierarchy.
+                </p>
+                <iframe id="treemap-frame" src="treemap.html" title="Hierarchical Tree Map of COVID-19 Cases"></iframe>
+            </section>
+
+            <!-- Force-Directed Graph Section -->
+            <section style="flex: 1; max-width: none;">
+                <h2>Network of COVID-19 Cases</h2>
+                <div class="btn-container">
+                    <select class="format-select" id="force-format">
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
+                        <option value="svg">SVG</option>
+                    </select>
+                    <button class="download-btn" onclick="downloadVisualization('force')">Download</button>
+                </div>
+                <p class="description">
+                    This force-directed graph shows the relationships between patients and infection cases in South Korea.<br>
+                    Use the filter to explore specific infection cases and see their connections. Nodes can be dragged to rearrange the network layout.
+                </p>
+                <iframe id="force-frame" src="force_directed.html" title="Network Graph of COVID-19 Cases"></iframe>
+            </section>
+        </div>
+
+        <!-- Timeline Section -->
+        <section style="width: 100%; max-width: none;">
+            <h2>COVID-19 Cases Timeline</h2>
+            <div class="btn-container">
+                <select class="format-select" id="timeline-format">
+                    <option value="png">PNG</option>
+                    <option value="jpeg">JPEG</option>
+                    <option value="svg">SVG</option>
+                </select>
+                <button class="download-btn" onclick="downloadVisualization('timeline')">Download</button>
+            </div>
+            <p class="description">
+                Interactive timeline showing the progression of confirmed, released, and deceased COVID-19 cases over time in South Korea.<br>
+                Use the play button to animate the visualization or manually control the progress with the slider.<br>
+                Hover over lines for detailed information.<br>
+                <strong>Note:</strong> The timeline data is shown on a logarithmic scale to better visualize the trends, instead of the actual case numbers.
+            </p>
+            <iframe id="timeline-frame" src="timeline.html" title="Timeline of COVID-19 Cases"></iframe>
+        </section>
+
+    </main>
+
+    <script>
+        function downloadVisualization(type) {
+            const frame = document.getElementById(`${type}-frame`);
+            const format = document.getElementById(`${type}-format`).value;
+            if (frame && frame.contentWindow) {
+                // Send message to iframe to trigger download
+                frame.contentWindow.postMessage({
+                    type: 'download',
+                    visualization: type,
+                    format: format
+                }, '*');
+                console.log("Type: " + type);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Korea Covid Map Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson@3"></script>
+    <style>
+        /* Styling for the overall webpage layout and map visualization */
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        /* Styling for the main header */
+        h1 {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 24px;
+            color: #333;
+        }
+        /* Styling for the region filter controls */
+        #controls {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        #controls label {
+            margin-right: 10px;
+        }
+        /* Styling for the tooltip displayed on hover */
+        .tooltip {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            pointer-events: none;
+            font-size: 13px;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 300px;
+            z-index: 1000;
+        }
+        .tooltip h4 {
+            margin: 0 0 8px 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            color: #333;
+        }
+        .tooltip p {
+            margin: 4px 0;
+            line-height: 1.4;
+        }
+        .tooltip .stat {
+            color: #2196F3;
+            font-weight: bold;
+        }
+        /* Styling for map pins indicating data points */
+        .pin {
+            stroke: #000;
+            stroke-width: 0.5px;
+            cursor: pointer;
+        }
+        /* Styling for the legend container and its items */
+        .legend {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            max-height: 300px;  /* Reduced from 400px */
+            overflow-y: auto;
+            background: white;
+            padding: 10px;      /* Reduced from 15px */
+            border-radius: 6px;  /* Reduced from 8px */
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            width: 160px;       /* Reduced from 200px */
+            cursor: move; /* Add cursor style for dragging */
+            user-select: none; /* Prevent text selection while dragging */
+        }
+        .legend h3 {
+            margin-top: 0;
+            margin-bottom: 8px;  /* Reduced from 10px */
+            padding-bottom: 8px; /* Reduced from 10px */
+            border-bottom: 1px solid #eee;
+            font-size: 14px;    /* Added to make header smaller */
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            padding: 4px;       /* Reduced from 8px */
+            margin: 2px 0;      /* Reduced from 4px */
+            border-radius: 3px;  /* Reduced from 4px */
+            cursor: pointer;
+            transition: background-color 0.2s;
+            font-size: 12px;    /* Added to make text smaller */
+        }
+        .legend-item:hover {
+            background-color: #f5f5f5;
+        }
+        .legend-item.selected {
+            background-color: #e0e0e0;
+        }
+        .legend-color {
+            width: 10px;        /* Reduced from 12px */
+            height: 10px;       /* Reduced from 12px */
+            margin-right: 6px;  /* Reduced from 8px */
+            border-radius: 50%;
+            border: 1px solid rgba(0,0,0,0.2);
+        }
+        /* Background styling for the map */
+        svg {
+            background: linear-gradient(to bottom, #cfe8f3, #8ab8d4);
+        }
+        /* Styling for Korean provinces with hover effect */
+        .korea-province {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .korea-province:hover {
+            filter: brightness(1.1);
+        }
+        /* Add to existing legend styles */
+        .legend-content {
+            max-height: 250px;  /* Reduced from 400px */
+            overflow-y: auto;
+            transition: max-height 0.3s ease-out;
+        }
+        .legend-content.collapsed {
+            max-height: 0;
+            overflow: hidden;
+        }
+        .legend-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .toggle-button {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 5px;
+            color: #666;
+        }
+        .toggle-button:hover {
+            color: #333;
+        }
+        /* Add this to your existing styles section */
+        .province-tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <!-- Controls for filtering map data by region -->
+    <div id="controls">
+        <label for="regionFilter">Region:</label>
+        <select id="regionFilter">
+            <option value="All">All</option>
+        </select>
+    </div>
+    <!-- Containers for map visualization, legend, and tooltip -->
+    <div id="map"></div>
+    <div id="legend" class="legend"></div>
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        // Define the dimensions for the SVG container
+        const width = 1000;
+        const height = 700;
+
+        console.log("Starting visualization...");
+
+        // Append an SVG element to the map container
+        const svg = d3.select("#map")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // Variable to track the current zoom level
+        let currentZoom = 1;
+
+        // Create a group element for applying zoom transformations
+        const g = svg.append("g");
+
+        // Define the map projection and its center point
+        const projection = d3.geoMercator()
+            .center([128, 36])
+            .scale(3500)
+            .translate([width / 2, height / 2]);
+
+        // Path generator for geographic shapes using the defined projection
+        const path = d3.geoPath().projection(projection);
+
+        // Tooltip for displaying data on hover
+        const tooltip = d3.select("#tooltip");
+
+        // Create separate group elements for map layers in the desired drawing order
+        const baseMapGroup = g.append("g").attr("class", "base-map");
+        const provincesGroup = g.append("g").attr("class", "provinces");
+        const pinsGroup = g.append("g").attr("class", "pins");
+
+        function initializeVisualization(world, korea, data) {
+            console.log("All data loaded successfully");
+            
+            // Filter the world map data to exclude South Korea
+            const countries = topojson.feature(world, world.objects.countries).features
+                .filter(d => d.id !== '410'); // Exclude South Korea
+
+            // Render the base world map, excluding Korea
+            baseMapGroup.selectAll("path")
+                .data(countries)
+                .enter()
+                .append("path")
+                .attr("d", path)
+                .attr("fill", "#a0d3d9")
+                .attr("stroke", "#555")
+                .attr("stroke-width", 0.5);
+
+            // Render the provinces of Korea
+            provincesGroup.selectAll("path")
+                .data(korea.features)
+                .enter()
+                .append("path")
+                .attr("d", path)
+                .attr("class", "korea-province")
+                .attr("fill", "#ffedda")
+                .attr("stroke", "#444")
+                .attr("stroke-width", 0.5)
+                .on("mouseover", function(event, d) {
+                    d3.select(this)
+                        .attr("fill", "#ffe0b8")
+                        .attr("stroke-width", 1.5);
+                    
+                    // Add province name tooltip
+                    tooltip
+                        .attr("class", "province-tooltip")
+                        .style("display", "block")
+                        .html(d.properties.name_eng)
+                        .style("left", (event.pageX + 5) + "px")
+                        .style("top", (event.pageY - 25) + "px");
+                })
+                .on("mousemove", function(event) {
+                    tooltip
+                        .style("left", (event.pageX + 5) + "px")
+                        .style("top", (event.pageY - 25) + "px");
+                })
+                .on("mouseout", function() {
+                    d3.select(this)
+                        .attr("fill", "#ffedda")
+                        .attr("stroke-width", 0.5);
+                    tooltip.style("display", "none");
+                });
+
+            // Filter valid COVID data points with latitude and longitude
+            const validData = data.filter(d => d.latitude && d.longitude);
+            const relationships = Array.from(new Set(validData.map(d => d.relationship))).sort();
+
+            // Define a color scale for different relationships
+            const colorScale = d3.scaleOrdinal()
+                .domain(relationships)
+                .range(d3.schemeCategory10);
+
+            // Populate the region filter dropdown with unique region names
+            const regionFilter = d3.select("#regionFilter");
+            const regions = Array.from(new Set(validData.map(d => d.province))).sort();
+            regions.forEach(region => {
+                regionFilter.append("option").attr("value", region).text(region);
+            });
+
+            // Create the legend for relationship types
+            const legend = d3.select("#legend");
+            legend.html(""); // Clear existing content
+
+            // Create header with toggle button
+            const legendHeader = legend.append("div")
+                .attr("class", "legend-header");
+            
+            legendHeader.append("h3")
+                .style("margin", "0")
+                .text("Cases");
+            
+            const toggleButton = legendHeader.append("button")
+                .attr("class", "toggle-button")
+                .html("−") // Unicode minus sign
+                .on("click", function(event) {
+                    event.stopPropagation(); // Prevent drag when clicking button
+                    const content = legend.select(".legend-content");
+                    const isCollapsed = content.classed("collapsed");
+                    content.classed("collapsed", !isCollapsed);
+                    d3.select(this).html(isCollapsed ? "−" : "+");
+                });
+
+            // Create content container
+            const legendContent = legend.append("div")
+                .attr("class", "legend-content");
+
+            // Set to track selected relationship types
+            let selectedRelationships = new Set();
+
+            // Add legend items to content container instead of directly to legend
+            relationships.forEach(relationship => {
+                const legendItem = legendContent.append("div")
+                    .attr("class", "legend-item")
+                    .on("click", function() {
+                        const item = d3.select(this);
+                        const isSelected = item.classed("selected");
+                        
+                        if (isSelected) {
+                            selectedRelationships.delete(relationship);
+                            item.classed("selected", false);
+                        } else {
+                            selectedRelationships.add(relationship);
+                            item.classed("selected", true);
+                        }
+
+                        // Update the visualization based on selected filters
+                        const filteredData = validData.filter(d => {
+                            const regionMatch = regionFilter.node().value === "All" || 
+                                              d.province === regionFilter.node().value;
+                            const relationshipMatch = selectedRelationships.size === 0 || 
+                                                   selectedRelationships.has(d.relationship);
+                            return regionMatch && relationshipMatch;
+                        });
+
+                        updatePins(filteredData);
+                    });
+
+                legendItem.append("div")
+                    .attr("class", "legend-color")
+                    .style("background-color", colorScale(relationship));
+
+                legendItem.append("span")
+                    .text(`${relationship} (${validData.filter(d => d.relationship === relationship).length})`);
+            });
+
+            // Make legend draggable
+            let isDragging = false;
+            let currentX;
+            let currentY;
+            let initialX;
+            let initialY;
+
+            legend.on("mousedown", function(event) {
+                isDragging = true;
+                const legendElement = legend.node();
+                const rect = legendElement.getBoundingClientRect();
+                
+                initialX = event.clientX - rect.left;
+                initialY = event.clientY - rect.top;
+                
+                event.preventDefault();
+            });
+
+            d3.select("body")
+                .on("mousemove", function(event) {
+                    if (isDragging) {
+                        currentX = event.clientX - initialX;
+                        currentY = event.clientY - initialY;
+                        
+                        legend
+                            .style("left", currentX + "px")
+                            .style("right", null)
+                            .style("top", currentY + "px");
+                    }
+                })
+                .on("mouseup", function() {
+                    isDragging = false;
+                });
+
+            // Add touch support
+            legend
+                .on("touchstart", function(event) {
+                    isDragging = true;
+                    const legendElement = legend.node();
+                    const rect = legendElement.getBoundingClientRect();
+                    const touch = event.touches[0];
+                    
+                    initialX = touch.clientX - rect.left;
+                    initialY = touch.clientY - rect.top;
+                    
+                    event.preventDefault();
+                });
+
+            d3.select("body")
+                .on("touchmove", function(event) {
+                    if (isDragging) {
+                        const touch = event.touches[0];
+                        currentX = touch.clientX - initialX;
+                        currentY = touch.clientY - initialY;
+                        
+                        legend
+                            .style("left", currentX + "px")
+                            .style("right", null)
+                            .style("top", currentY + "px");
+                        
+                        event.preventDefault();
+                    }
+                })
+                .on("touchend", function() {
+                    isDragging = false;
+                });
+
+            // Function to update the map pins based on filtered data
+            function updatePins(filteredData) {
+                const pins = pinsGroup.selectAll(".pin").data(filteredData, d => d.id);
+
+                pins.exit().remove();
+
+                // Adjust radius and stroke width for existing pins
+                const pinRadius = 3 / Math.pow(currentZoom, 0.7);
+                const strokeWidth = 0.5 / Math.pow(currentZoom, 0.7);
+
+                pinsGroup.selectAll(".pin")
+                    .attr("r", pinRadius)
+                    .style("stroke-width", strokeWidth);
+
+                pins.enter()
+                    .append("circle")
+                    .attr("class", "pin")
+                    .attr("cx", d => projection([+d.longitude, +d.latitude])[0])
+                    .attr("cy", d => projection([+d.longitude, +d.latitude])[1])
+                    .attr("r", pinRadius)
+                    .attr("fill", d => colorScale(d.relationship))
+                    .style("opacity", 0.8)
+                    .style("stroke-width", strokeWidth)
+                    .on("mouseover", function (event, d) {
+                        d3.select(this)
+                            .attr("stroke", "#000")
+                            .attr("stroke-width", 2 / currentZoom);
+
+                        const date = new Date(d.confirmed_date);
+                        const formattedDate = date.toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                        });
+
+                        tooltip
+                            .style("display", "block")
+                            .html(`
+                                <h4>${d.infection_case}</h4>
+                                <p><strong>Location:</strong> ${d.city}, ${d.province}</p>
+                                <p><strong>Type:</strong> <span class="stat">${d.relationship}</span></p>
+                                <p><strong>Confirmed:</strong> ${formattedDate}</p>
+                                ${d.note ? `<p><strong>Note:</strong> ${d.note}</p>` : ''}
+                            `)
+                            .style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 20) + "px");
+                    })
+                    .on("mouseout", () => {
+                        tooltip.style("display", "none");
+                    })
+                    .on("click", function () {
+                        d3.selectAll(".pin").attr("stroke", "none");
+                        d3.select(this).attr("stroke", "black").attr("stroke-width", 2);
+                    });
+            }
+
+            // Initial rendering of pins using all valid data
+            updatePins(validData);
+
+            // Function to apply the selected filters and update the visualization
+            function applyFilters() {
+                const selectedRegion = regionFilter.node().value;
+                const filteredData = validData.filter(d => {
+                    const regionMatch = selectedRegion === "All" || d.province === selectedRegion;
+                    const relationshipMatch = selectedRelationships.size === 0 || 
+                                            selectedRelationships.has(d.relationship);
+                    return regionMatch && relationshipMatch;
+                });
+                updatePins(filteredData);
+            }
+
+            // Event listener for changes in the region filter
+            regionFilter.on("change", applyFilters);
+
+            // Define zoom behavior with scaling and translation constraints
+            const zoom = d3.zoom()
+                .scaleExtent([1, 20])
+                .translateExtent([[0, 0], [width, height]])
+                .on("zoom", event => {
+                    currentZoom = event.transform.k;
+                    g.attr("transform", event.transform);
+                    
+                    // Adjust pin size and stroke width dynamically during zoom
+                    const pinRadius = 3 / Math.pow(currentZoom, 0.7);
+                    const strokeWidth = 0.5 / Math.pow(currentZoom, 0.7);
+                    
+                    pinsGroup.selectAll(".pin")
+                        .attr("r", pinRadius)
+                        .style("stroke-width", strokeWidth);
+                });
+
+            // Attach zoom behavior to the SVG element
+            svg.call(zoom);
+
+            // Set the initial zoom level and position
+            svg.call(zoom.transform, d3.zoomIdentity
+                .translate(width / 2, height / 2)
+                .scale(1)
+                .translate(-projection([128, 36])[0], -projection([128, 36])[1]));
+        }
+
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'download' && event.data.visualization === 'map') {
+                const svg = document.querySelector('svg');
+                
+                if (event.data.format === 'svg') {
+                    // Download as SVG
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = URL.createObjectURL(svgBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `covid19_${event.data.visualization}.svg`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else {
+                    // Download as PNG or JPEG
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const DOMURL = window.URL || window.webkitURL || window;
+                    const img = new Image();
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = DOMURL.createObjectURL(svgBlob);
+                    
+                    img.onload = function() {
+                        canvas.width = svg.getBoundingClientRect().width;
+                        canvas.height = svg.getBoundingClientRect().height;
+                        
+                        // For JPEG, fill white background
+                        if (event.data.format === 'jpeg') {
+                            ctx.fillStyle = 'white';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        }
+                        
+                        ctx.drawImage(img, 0, 0);
+                        DOMURL.revokeObjectURL(url);
+                        
+                        const imgUrl = canvas.toDataURL(`image/${event.data.format}`);
+                        const a = document.createElement('a');
+                        a.href = imgUrl;
+                        a.download = `covid19_${event.data.visualization}.${event.data.format}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    };
+                    img.src = url;
+                }
+            }
+        });
+
+        // Load data sequentially
+        d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json")
+            .then(function(world) {
+                d3.json("skorea-provinces-2018-geo.json")
+                    .then(function(korea) {
+                        d3.csv("covid_proj_dataset.csv")
+                            .then(function(data) {
+                                initializeVisualization(world, korea, data);
+                            })
+                            .catch(error => console.error("Error loading COVID data:", error));
+                    })
+                    .catch(error => console.error("Error loading Korea data:", error));
+            })
+            .catch(error => console.error("Error loading world data:", error));
+
+        // Helper function to calculate summary statistics for a specific province
+        function calculateProvinceStats(provinceName) {
+            const provinceData = data.filter(d => d.province === provinceName);
+            
+            // Calculate approximate area (this is an assumed value).
+            const area = 1000; // km²
+            
+            return {
+                totalCases: provinceData.length,
+                clusters: new Set(provinceData.map(d => d.infection_case)).size,
+                majorCities: [...new Set(provinceData.map(d => d.city))].slice(0, 2).join(", "),
+                area: area
+            };
+        }
+    </script>
+</body>
+</html>

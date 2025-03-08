@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> COVID Cases Network</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* General styles for the webpage */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        /* Styling for the SVG container */
+        svg {
+            border: 1px solid #ccc;
+        }
+        /* Styling for the tooltip displayed on hover */
+        .tooltip {
+            position: absolute;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 12px;
+        }
+        /* Styling for the filter controls */
+        .filter-controls {
+            margin-bottom: 20px;
+        }
+        /* Styling for the legend section */
+        .legend {
+            font-size: 12px;
+        }
+        /* Styling for the legend circles */
+        .legend circle {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Filter controls for filtering nodes by infection case -->
+    <div class="filter-controls">
+        <label for="filter">Filter by Infection Case: </label>
+        <select id="filter">
+            <option value="all">All Cases</option>
+        </select>
+    </div>
+    <!-- SVG container for the network visualization -->
+    <svg width="600" height="600"></svg>
+    <!-- Tooltip for displaying node information -->
+    <div class="tooltip" style="display: none;"></div>
+
+    <script>
+        // Define the dimensions for the SVG canvas
+        const width = 800, height = 600;
+    
+        // Select the SVG element and append a container group
+        const svg = d3.select("svg");
+        const tooltip = d3.select(".tooltip");
+        const color = d3.scaleOrdinal(d3.schemeCategory10); // Define a color scale for node types
+    
+        // Define zoom behavior and attach it to the SVG container
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4]) // Set minimum and maximum zoom levels
+            .on("zoom", (event) => {
+                svg.select("g").attr("transform", event.transform); // Apply zoom transformations
+            });
+    
+        svg.call(zoom);
+        const container = svg.append("g"); // Group to hold all nodes and links
+
+        // Create a legend to describe the node types
+        const legend = svg.append("g")
+            .attr("class", "legend")
+            .attr("transform", "translate(20, 20)");
+
+        // Add circles to the legend for each node type
+        legend.selectAll("circle")
+            .data(["Patient", "Infection Case"])
+            .enter()
+            .append("circle")
+            .attr("cx", 10)
+            .attr("cy", (d, i) => i * 25) // Position circles vertically
+            .attr("r", 6) // Radius of the legend circles
+            .attr("fill", d => color(d));
+
+        // Add labels to the legend
+        legend.selectAll("text")
+            .data(["Patient", "Infection Case"])
+            .enter()
+            .append("text")
+            .attr("x", 25)
+            .attr("y", (d, i) => i * 25 + 4) // Position labels next to circles
+            .text(d => d);
+
+        // Event listener for receiving download requests   
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'download' && event.data.visualization === 'force') {
+                const svg = document.querySelector('svg');
+                
+                // Download as SVG
+                if (event.data.format === 'svg') {
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = URL.createObjectURL(svgBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `covid19_${event.data.visualization}.svg`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else {
+                    // Download as PNG or JPEG
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const DOMURL = window.URL || window.webkitURL || window;
+                    const img = new Image();
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = DOMURL.createObjectURL(svgBlob);
+                    
+                    img.onload = function() {
+                        canvas.width = svg.getBoundingClientRect().width;
+                        canvas.height = svg.getBoundingClientRect().height;
+                        
+                        // For JPEG, fill white background
+                        if (event.data.format === 'jpeg') {
+                            ctx.fillStyle = 'white';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        }
+                        
+                        ctx.drawImage(img, 0, 0);
+                        DOMURL.revokeObjectURL(url);
+                        
+                        const imgUrl = canvas.toDataURL(`image/${event.data.format}`);
+                        const a = document.createElement('a');
+                        a.href = imgUrl;
+                        a.download = `covid19_${event.data.visualization}.${event.data.format}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    };
+                    img.src = url;
+                }
+            }
+        });
+
+        // Load data from the CSV file
+        d3.csv("covid_proj_dataset.csv").then((data) => {
+            // Generate nodes for patients
+            const patientNodes = data.map(d => ({ 
+                id: d.patient_id, 
+                type: "Patient",
+                city: d.city,
+                province: d.province
+            }));
+            // Generate nodes for unique infection cases
+            const infectionCaseNodes = Array.from(new Set(data.map(d => d.infection_case)))
+                .map(d => ({
+                    id: d,
+                    type: "Infection Case",
+                    city: data.find(patient => patient.infection_case === d)?.city,
+                    province: data.find(patient => patient.infection_case === d)?.province
+                }));
+            const nodes = [...patientNodes, ...infectionCaseNodes]; // Combine patient and infection case nodes
+
+            // Create links between patients and infection cases
+            const links = data.map(d => ({ source: d.patient_id, target: d.infection_case }));
+
+            // Extract unique city and province names
+            const cities = Array.from(new Set(nodes.map(d => d.city)));
+            const provinces = Array.from(new Set(nodes.map(d => d.province)));
+
+            // Create virtual anchor points for cities to guide node clustering
+            const cityAnchors = cities.map((city, i) => ({
+                fx: (width * (i + 1)) / (cities.length + 1), // Position anchors horizontally
+                fy: height / 3, // Set anchor height
+                city: city
+            }));
+
+            // Create virtual anchor points for provinces
+            const provinceAnchors = provinces.map((province, i) => ({
+                fx: (width * (i + 1)) / (provinces.length + 1),
+                fy: 2 * height / 3,
+                province: province
+            }));
+
+            // Configure the force simulation for node layout
+            const simulation = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id) // Define links between nodes
+                    .distance(d => {
+                        // Define link distances based on location similarity
+                        if (d.source.city === d.target.city) return 30; // Same city
+                        if (d.source.province === d.target.province) return 80; // Same province
+                        return 150; // Different province
+                    }))
+                .force("charge", d3.forceManyBody()
+                    .strength(d => d.type === "Infection Case" ? -800 : -400)) // Repulsion strength
+                .force("center", d3.forceCenter(width / 2, height / 2)) // Center the visualization
+                .force("collide", d3.forceCollide().radius(20)) // Prevent node overlap
+                // Custom force to cluster nodes by city
+                .force("city", (alpha) => {
+                    nodes.forEach(node => {
+                        const anchor = cityAnchors.find(a => a.city === node.city);
+                        if (anchor) {
+                            node.vx += (anchor.fx - node.x) * alpha * 0.3; // Adjust velocity toward anchor
+                            node.vy += (anchor.fy - node.y) * alpha * 0.3;
+                        }
+                    });
+                })
+                // Custom force to cluster nodes by province
+                .force("province", (alpha) => {
+                    nodes.forEach(node => {
+                        const anchor = provinceAnchors.find(a => a.province === node.province);
+                        if (anchor) {
+                            node.vx += (anchor.fx - node.x) * alpha * 0.1;
+                            node.vy += (anchor.fy - node.y) * alpha * 0.1;
+                        }
+                    });
+                })
+                // Force to prevent overlap of city clusters on the x-axis
+                .force("x-spacing", (alpha) => {
+                    const cityGroups = d3.group(nodes, d => d.city); // Group nodes by city
+                    let i = 0;
+                    for (let [city, groupNodes] of cityGroups) {
+                        const targetX = (width * (i + 1)) / (cityGroups.size + 1);
+                        groupNodes.forEach(node => {
+                            node.vx += (targetX - node.x) * alpha * 0.1; // Adjust x-velocity
+                        });
+                        i++;
+                    }
+                })
+                .alphaDecay(0.01) // Reduce alpha decay for smoother stabilization
+                .velocityDecay(0.3) // Set friction level for movement
+                .alpha(0.8); // Set initial alpha for simulation
+
+            // Draw links between nodes
+            const link = container.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(links)
+                .enter().append("line")
+                .attr("stroke", "#999")
+                .attr("stroke-opacity", 0.6)
+                .attr("stroke-width", 1);
+    
+            // Draw nodes and style them based on type
+            const node = container.append("g")
+                .attr("class", "nodes")
+                .selectAll("circle")
+                .data(nodes)
+                .enter().append("circle")
+                .attr("r", 6)
+                .attr("fill", d => color(d.type))
+                // Dragging functionality for manual repositioning
+                .call(d3.drag()
+                    .on("start", (event, d) => {
+                        if (!event.active) simulation.alphaTarget(0.3).restart();
+                        d.fx = d.x; // Fix node position
+                        d.fy = d.y;
+                    })
+                    .on("drag", (event, d) => {
+                        d.fx = event.x; // Update position during drag
+                        d.fy = event.y;
+                    })
+                    .on("end", (event, d) => {
+                        if (!event.active) simulation.alphaTarget(0);
+                        d.fx = null; // Release fixed position
+                        d.fy = null;
+                    }));
+    
+            // Add tooltips for nodes on hover
+            node.on("mouseover", (event, d) => {
+                let tooltipContent = '';
+                if (d.type === "Patient") {
+                    // Tooltip for patient nodes
+                    tooltipContent = `
+                        <strong>Patient ID:</strong> ${d.id}<br>
+                        <strong>City:</strong> ${d.city || 'N/A'}<br>
+                        <strong>Province:</strong> ${d.province || 'N/A'}
+                    `;
+                } else if (d.type === "Infection Case") {
+                    // Tooltip for infection case nodes
+                    const connectedPatients = links.filter(link => link.target.id === d.id).length;
+                    tooltipContent = `
+                        <strong>Case:</strong> ${d.id}<br>
+                        <strong>Affected Patients:</strong> ${connectedPatients}<br>
+                    `;
+                }
+                
+                tooltip.style("display", "block")
+                    .style("left", `${event.pageX + 5}px`)
+                    .style("top", `${event.pageY + 5}px`)
+                    .html(tooltipContent); // Display tooltip content
+            }).on("mouseout", () => tooltip.style("display", "none"));
+
+            // Populate the filter dropdown with unique infection cases
+            const infectionCases = Array.from(new Set(data.map(d => d.infection_case)));
+            const filterSelect = d3.select("#filter");
+            infectionCases.forEach(caseType => {
+                filterSelect.append("option")
+                    .attr("value", caseType)
+                    .text(caseType);
+            });
+
+            // Event listener for filtering nodes by infection case
+            filterSelect.on("change", function() {
+                const selectedCase = this.value;
+                
+                // Update node visibility based on the selected case
+                node.style("display", d => {
+                    if (selectedCase === "all") return "block";
+                    if (d.type === "Infection Case") {
+                        return d.id === selectedCase ? "block" : "none";
+                    }
+                    // Show patient nodes connected to the selected case
+                    return links.some(link => 
+                        link.source.id === d.id && link.target.id === selectedCase
+                    ) ? "block" : "none";
+                });
+
+                // Update link visibility based on the selected case
+                link.style("display", d => {
+                    if (selectedCase === "all") return "block";
+                    return d.target.id === selectedCase ? "block" : "none";
+                });
+            });
+    
+            let isFirstTick = true; // Track the first simulation tick
+            // Update positions of nodes and links on each simulation tick
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+    
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+
+                // Adjust view to fit content on the first tick
+                if (isFirstTick && nodes[0].x !== undefined) {
+                    isFirstTick = false;
+                    
+                    // Calculate bounds for the graph content
+                    const xExtent = d3.extent(nodes, d => d.x);
+                    const yExtent = d3.extent(nodes, d => d.y);
+                    
+                    const dx = xExtent[1] - xExtent[0];
+                    const dy = yExtent[1] - yExtent[0];
+                    const x = (xExtent[0] + xExtent[1]) / 2;
+                    const y = (yExtent[0] + yExtent[1]) / 2;
+                    
+                    // Compute scale to fit content with padding
+                    const scale = 0.9 / Math.max(dx / width, dy / height);
+                    
+                    // Apply transform to center the content
+                    const transform = d3.zoomIdentity
+                        .translate(width / 2, height / 2)
+                        .scale(scale)
+                        .translate(-x, -y);
+                    
+                    svg.call(zoom.transform, transform);
+                }
+            });
+        }).catch(error => console.error("Error loading data:", error)); // Handle errors in data loading
+    </script>
+</body>
+</html>

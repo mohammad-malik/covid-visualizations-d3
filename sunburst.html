@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sunburst Chart - Hierarchical Data</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* General styling for the webpage */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+        }
+
+        /* Styling for the page title */
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        /* Styling for the SVG container */
+        svg {
+            display: block;
+            margin: 100px auto 20px auto;
+        }
+
+        /* Styling for arcs in the sunburst chart */
+        .arc path {
+            stroke: #fff;
+            stroke-width: 1px;
+        }
+
+        .arc:hover path {
+            opacity: 0.8;
+        }
+
+        /* Styling for labels displayed on arcs */
+        .label {
+            font-size: 12px;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+
+        /* Styling for the center circle used for navigation */
+        .center-circle {
+            cursor: pointer;
+            fill: white;
+            stroke: #ccc;
+        }
+
+        /* Styling for the back navigation text inside the center circle */
+        .back-text {
+            text-anchor: middle;
+            pointer-events: none;
+            font-size: 14px;
+            fill: #666;
+        }
+
+        /* Styling for the legend container and its items */
+        .legend {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            max-height: 300px;  /* Reduced from 400px */
+            overflow-y: auto;
+            background: white;
+            padding: 10px;      /* Reduced from 15px */
+            border-radius: 6px;  /* Reduced from 8px */
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            width: 160px;       /* Reduced from 200px */
+            cursor: move;
+            user-select: none;
+        }
+        .legend h3 {
+            margin-top: 0;
+            margin-bottom: 8px;  /* Reduced from 10px */
+            padding-bottom: 8px; /* Reduced from 10px */
+            border-bottom: 1px solid #eee;
+            font-size: 14px;    /* Added to make header smaller */
+        }
+        .legend-content {
+            max-height: 250px;  /* Reduced from 400px */
+            overflow-y: auto;
+            transition: max-height 0.3s ease-out;
+        }
+        .legend-content.collapsed {
+            max-height: 0;
+            overflow: hidden;
+        }
+        .legend-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .toggle-button {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 5px;
+            color: #666;
+        }
+        .toggle-button:hover {
+            color: #333;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            padding: 4px;       /* Reduced from 8px */
+            margin: 2px 0;      /* Reduced from 4px */
+            border-radius: 3px;  /* Reduced from 4px */
+            cursor: pointer;
+            transition: background-color 0.2s;
+            font-size: 12px;    /* Added to make text smaller */
+        }
+        .legend-item:hover {
+            background-color: #f5f5f5;
+        }
+        .legend-color {
+            width: 10px;        /* Reduced from 12px */
+            height: 10px;       /* Reduced from 12px */
+            margin-right: 6px;  /* Reduced from 8px */
+            border-radius: 50%;
+            border: 1px solid rgba(0,0,0,0.2);
+        }
+
+        /* Tooltip styling */
+        .tooltip {
+            position: absolute;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            opacity: 0;
+            transition: opacity 0.2s;
+            max-width: 200px;
+        }
+        .tooltip-title {
+            font-weight: bold;
+            margin-bottom: 4px;
+            color: #333;
+        }
+        .tooltip-content {
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- SVG container for the sunburst chart -->
+    <svg id="sunburst" width="600" height="650"></svg>
+    <!-- Remove the existing legend container and button -->
+    <div id="legend" class="legend"></div>
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        // Define dimensions for the sunburst chart
+        const width = 600;
+        const radius = width / 2;
+        const marginTop = 100;
+
+        // Create an SVG element and group it for transformations
+        const svg = d3.select("#sunburst")
+            .attr("width", width)
+            .attr("height", width + marginTop)
+            .append("g")
+            .attr("transform", `translate(${radius}, ${radius + marginTop})`);
+
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'download' && event.data.visualization === 'sunburst') {
+                const svg = document.querySelector('svg');
+                
+                // Download as SVG
+                if (event.data.format === 'svg') {
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = URL.createObjectURL(svgBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `covid19_${event.data.visualization}.svg`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else {
+                    // Download as PNG or JPEG
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const DOMURL = window.URL || window.webkitURL || window;
+                    const img = new Image();
+                    const svgBlob = new Blob([data], {type: 'image/svg+xml;charset=utf-8'});
+                    const url = DOMURL.createObjectURL(svgBlob);
+                    
+                    img.onload = function() {
+                        canvas.width = svg.getBoundingClientRect().width;
+                        canvas.height = svg.getBoundingClientRect().height;
+                        
+                        // For JPEG, fill white background
+                        if (event.data.format === 'jpeg') {
+                            ctx.fillStyle = 'white';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        }
+                        
+                        ctx.drawImage(img, 0, 0);
+                        DOMURL.revokeObjectURL(url);
+                        
+                        const imgUrl = canvas.toDataURL(`image/${event.data.format}`);
+                        const a = document.createElement('a');
+                        a.href = imgUrl;
+                        a.download = `covid19_${event.data.visualization}.${event.data.format}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    };
+                    img.src = url;
+                }
+            }
+        });
+
+        // Define a custom color palette for the chart
+        const pastelColors = [
+            "#FFADB8",  // Pastel Pink
+            "#A8E6CA",  // Pastel Mint Green
+            "#A0D9F5",  // Pastel Light Blue
+            "#FFEBA0",  // Pastel Yellow
+            "#FFBEA5",  // Pastel Peach
+            "#D6A8F5",  // Pastel Lavender
+            "#7FE3D4",  // Pastel Aqua
+            "#FFACC4",  // Pastel Rose
+            "#B9A7F2",  // Pastel Periwinkle	
+            "#FFCC85",  // Pastel Apricot
+            "#F5C6DA",  // Pastel Blush Pink
+            "#C7F2D0",  // Pastel Light Mint
+            "#ADD9F2",  // Pastel Sky Blue
+            "#FFE9BA",  // Pastel Butter Yellow
+            "#F5B9A7"   // Pastel Salmon
+        ];
+        const color = d3.scaleOrdinal(pastelColors);
+
+        let root; // Store the root node of the hierarchy
+        let currentNode; // Track the currently viewed node in the sunburst
+
+        // Load the dataset and build the hierarchical data
+        d3.csv("covid_proj_dataset.csv").then(data => {
+            const hierarchyData = buildHierarchy(data); // Convert flat data into a hierarchy
+
+            // Create a D3 hierarchy object from the hierarchical data
+            root = d3.hierarchy(hierarchyData)
+                .sum(d => d.value || 0) // Sum up values for leaf nodes
+                .sort((a, b) => b.value - a.value); // Sort nodes by value
+
+            // Define a partition layout to calculate arcs for the sunburst
+            const partition = d3.partition()
+                .size([2 * Math.PI, radius]);
+
+            partition(root); // Compute the partition layout
+            currentNode = root; // Set the initial view to the root node
+            renderSunburst(root); // Render the sunburst chart
+        });
+
+        // Render the sunburst chart for a given node
+        function renderSunburst(node) {
+            svg.selectAll("*").remove(); // Clear the SVG before rendering
+
+            // Define the arc generator
+            const arc = d3.arc()
+                .startAngle(d => d.x0)
+                .endAngle(d => d.x1)
+                .innerRadius(d => d.y0)
+                .outerRadius(d => d.y1);
+
+            // Bind data and create arcs for the sunburst
+            const arcs = svg.selectAll(".arc")
+                .data(node.descendants()) // Get all descendant nodes
+                .join("g")
+                .attr("class", "arc")
+                .on("click", (event, d) => {
+                    if (d.children) { // Navigate to the clicked node if it has children
+                        currentNode = d;
+                        renderSunburst(d);
+                    }
+                })
+                .on("mouseover", (event, d) => {
+                    const tooltip = d3.select("#tooltip");
+                    const percentage = ((d.value / root.value) * 100).toFixed(1);
+                    
+                    let content = `
+                        <div class="tooltip-title">${d.data.name}</div>
+                        <div class="tooltip-content">
+                            Confirmed Cases: ${d.value}<br>
+                            Percentage: ${percentage}%
+                        </div>
+                    `;
+                    
+                    if (d.data.infection_case) {
+                        content += `<div class="tooltip-content">
+                            Infection Case: ${d.data.infection_case}
+                        </div>`;
+                    }
+                    
+                    tooltip.html(content)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px")
+                        .style("opacity", 1);
+                })
+                .on("mousemove", (event) => {
+                    d3.select("#tooltip")
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px");
+                })
+                .on("mouseout", () => {
+                    d3.select("#tooltip")
+                        .style("opacity", 0);
+                });
+
+            // Append path elements to represent arcs
+            arcs.append("path")
+                .attr("d", arc)
+                .attr("fill", d => d.depth === 0 ? "white" : color(d.data.name || d.data.infection_case)) // Set arc color
+                .append("title") // Add tooltips for each arc
+                .text(d => `${d.data.name}\nConfirmed: ${d.value}\nInfection Case: ${d.data.infection_case}`);
+
+            // Add labels to the arcs
+            const textElements = arcs.append("text")
+                .attr("class", "label")
+                .attr("transform", d => {
+                    const x = (d.x0 + d.x1) / 2; // Calculate the middle angle
+                    const y = (d.y0 + d.y1) / 2; // Calculate the middle radius
+                    const angle = x * 180 / Math.PI - 90; // Convert radians to degrees
+                    const radius = y; // Position label along the radius
+                    return `rotate(${angle}) translate(${radius},0) ${angle > 90 ? 'rotate(180)' : ''}`; // Adjust rotation for readability
+                })
+                .style("opacity", d => {
+                    const arcLength = (d.x1 - d.x0) * (d.y0 + d.y1) / 2; // Calculate arc length
+                    return arcLength < 25 ? 0 : 1; // Hide labels for small arcs
+                })
+                .style("text-anchor", "middle") // Center text horizontally
+                .style("alignment-baseline", "middle") // Center text vertically
+                .style("display", d => {
+                    return (d.x1 - d.x0) < 0.1 ? "none" : "block"; // Hide very narrow labels
+                });
+
+            // Add text wrapping for better readability
+            textElements.each(function (d) {
+                const text = d3.select(this);
+                const arcWidth = (d.x1 - d.x0) * (d.y0 + d.y1) / 2; // Calculate available arc width
+                const arcHeight = d.y1 - d.y0; // Calculate arc height
+                const width = Math.min(arcHeight * 0.8, arcWidth * 0.6); // Adjust text width for fitting
+                
+                // Calculate dynamic font size based on both arc dimensions and depth
+                const maxFontSize = 14; // Maximum font size
+                const minFontSize = 8;  // Minimum font size
+                const depthFactor = Math.max(0.5, 1 - (d.depth * 0.2)); // Reduce size for deeper levels
+                const arcSize = Math.min(arcWidth, arcHeight);
+                const calculatedSize = Math.min(
+                    maxFontSize,
+                    Math.max(minFontSize, 
+                        (arcSize / 10) * depthFactor // Base size on arc dimensions
+                    )
+                );
+                
+                const words = d.data.name.split(/\s+/);
+                const fontSize = Math.min(
+                    calculatedSize,
+                    arcWidth / (d.data.name.length * 0.6)
+                );
+                
+                text.style("font-size", `${fontSize}px`);
+                
+                const lines = [];
+                let currentLine = [];
+                let currentLength = 0;
+
+                words.forEach(word => {
+                    const wordLength = word.length;
+                    if (currentLength + wordLength > width / (fontSize * 0.5)) {
+                        if (currentLine.length) lines.push(currentLine.join(" "));
+                        currentLine = [word];
+                        currentLength = wordLength;
+                    } else {
+                        currentLine.push(word);
+                        currentLength += wordLength + 1;
+                    }
+                });
+                if (currentLine.length) lines.push(currentLine.join(" ")); // Add remaining words
+
+                text.text(""); // Clear existing text
+                const lineHeight = 1.1; // Set line height for wrapping
+                const totalHeight = lines.length * lineHeight;
+
+                // Add each line of wrapped text as a tspan
+                lines.forEach((line, i) => {
+                    text.append("tspan")
+                        .attr("x", 0)
+                        .attr("dy", `${i === 0 ? -totalHeight / 2 + lineHeight : lineHeight}em`)
+                        .text(line);
+                });
+            });
+
+            // Add a center circle for navigating back to the parent node
+            if (node !== root) {
+                const centerRadius = node.y0; // Use the inner radius of the current node
+                svg.append("circle")
+                    .attr("class", "center-circle")
+                    .attr("r", centerRadius)
+                    .on("click", () => {
+                        currentNode = node.parent; // Navigate back to the parent node
+                        renderSunburst(node.parent);
+                    });
+
+                // Add text inside the center circle for navigation
+                svg.append("text")
+                    .attr("class", "back-text")
+                    .attr("dy", "0.35em") // Vertically center the text
+                    .text("Back");
+            }
+
+            // Update the legend based on the current view
+            updateLegend(node);
+        }
+
+        // Convert CSV data into a hierarchical structure
+        function buildHierarchy(data) {
+            const root = { name: "", children: [] };
+
+            data.forEach(row => {
+                const path = row["hierarchy_age_sex_case"].split(">"); // Split hierarchy path
+                if (path.some(p => p.includes("Unknown"))) return; // Skip unknown data
+                if (path[1]) path[1] = path[1].charAt(1).toUpperCase() + path[1].slice(2); // Capitalize gender labels
+
+                const value = +row["confirmed"]; // Parse confirmed cases
+                const infectionCase = row["infection_case"];
+                if (infectionCase === "Unknown") return; // Skip unknown infection cases
+
+                let currentNode = root;
+
+                // Traverse and build hierarchy nodes
+                path.forEach((name, index) => {
+                    let childNode = currentNode.children.find(c => c.name === name);
+                    if (!childNode) {
+                        childNode = { name, children: [] };
+                        currentNode.children.push(childNode);
+                    }
+                    if (index === path.length - 1) { // Leaf node
+                        childNode.value = (childNode.value || 0) + value;
+                        childNode.infection_case = infectionCase;
+                    }
+                    currentNode = childNode;
+                });
+            });
+
+            return root;
+        }
+
+        // Update the legend to reflect the current sunburst view
+        function updateLegend(node) {
+            const legend = d3.select("#legend");
+            legend.html(""); // Clear existing content
+
+            // Create header with toggle button
+            const legendHeader = legend.append("div")
+                .attr("class", "legend-header");
+            
+            legendHeader.append("h3")
+                .style("margin", "0")
+                .text(node === root ? "Age Groups" : node.data.name);
+            
+            const toggleButton = legendHeader.append("button")
+                .attr("class", "toggle-button")
+                .html("−")
+                .on("click", function(event) {
+                    event.stopPropagation();
+                    const content = legend.select(".legend-content");
+                    const isCollapsed = content.classed("collapsed");
+                    content.classed("collapsed", !isCollapsed);
+                    d3.select(this).html(isCollapsed ? "−" : "+");
+                });
+
+            // Create content container
+            const content = legend.append("div")
+                .attr("class", "legend-content");
+
+            // Get and sort legend items
+            let items = [];
+            if (node === root) {
+                items = Array.from(new Set(node.children.map(d => d.data.name)))
+                    .sort((a, b) => parseInt(a.split('-')[0]) - parseInt(b.split('-')[0]));
+            } else {
+                items = Array.from(new Set((node.children || []).map(d => d.data.name)))
+                    .sort((a, b) => a.localeCompare(b));
+            }
+
+            // Add legend items
+            items.forEach(name => {
+                const legendItem = content.append("div")
+                    .attr("class", "legend-item");
+
+                legendItem.append("div")
+                    .attr("class", "legend-color")
+                    .style("background-color", color(name));
+
+                legendItem.append("span")
+                    .text(name);
+            });
+
+            // Make legend draggable
+            let isDragging = false;
+            let currentX;
+            let currentY;
+            let initialX;
+            let initialY;
+
+            legend.on("mousedown", function(event) {
+                isDragging = true;
+                const legendElement = legend.node();
+                const rect = legendElement.getBoundingClientRect();
+                
+                initialX = event.clientX - rect.left;
+                initialY = event.clientY - rect.top;
+                
+                event.preventDefault();
+            });
+
+            d3.select("body")
+                .on("mousemove", function(event) {
+                    if (isDragging) {
+                        currentX = event.clientX - initialX;
+                        currentY = event.clientY - initialY;
+                        
+                        legend
+                            .style("left", currentX + "px")
+                            .style("right", null)
+                            .style("top", currentY + "px");
+                    }
+                })
+                .on("mouseup", function() {
+                    isDragging = false;
+                });
+
+            // Add touch support
+            legend
+                .on("touchstart", function(event) {
+                    isDragging = true;
+                    const legendElement = legend.node();
+                    const rect = legendElement.getBoundingClientRect();
+                    const touch = event.touches[0];
+                    
+                    initialX = touch.clientX - rect.left;
+                    initialY = touch.clientY - rect.top;
+                    
+                    event.preventDefault();
+                });
+
+            d3.select("body")
+                .on("touchmove", function(event) {
+                    if (isDragging) {
+                        const touch = event.touches[0];
+                        currentX = touch.clientX - initialX;
+                        currentY = touch.clientY - initialY;
+                        
+                        legend
+                            .style("left", currentX + "px")
+                            .style("right", null)
+                            .style("top", currentY + "px");
+                        
+                        event.preventDefault();
+                    }
+                })
+                .on("touchend", function() {
+                    isDragging = false;
+                });
+        }
+    </script>
+</body>
+
+</html>

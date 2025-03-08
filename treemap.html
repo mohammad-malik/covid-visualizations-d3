@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hierarchical Tree Map</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* General styles for the body and headings */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        /* Style for the SVG containing the tree map */
+        svg {
+            display: block;
+            margin: 20px auto;
+            background: #f5f5f5;
+            border: 1px solid #ccc;
+        }
+
+        /* Node styles for rectangles in the tree map */
+        .node {
+            cursor: pointer;
+            stroke: #fff;
+            stroke-width: 1px;
+        }
+
+        .node:hover {
+            opacity: 0.8;
+        }
+
+        /* Style for text labels in the tree map */
+        .label {
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        /* Tooltip styling */
+        #tooltip {
+            position: absolute;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        /* Legend container and elements */
+        .legend {
+            font-size: 12px;
+        }
+
+        .legend-item rect {
+            stroke: #fff;
+            stroke-width: 1px;
+        }
+
+        .legend-item text {
+            fill: #333;
+        }
+
+        /* Breadcrumb navigation styling */
+        .breadcrumb {
+            margin: 20px auto;
+            width: 960px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .breadcrumb span {
+            cursor: pointer;
+            color: #4363d8;
+            margin: 0 5px;
+        }
+
+        .breadcrumb span:hover {
+            text-decoration: underline;
+        }
+
+        /* Filters container and dropdown styles */
+        .filters {
+            margin: 20px auto;
+            width: 960px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .filter-select {
+            margin: 0 10px;
+            padding: 5px;
+            border-radius: 4px;
+        }
+    </style>
+    <script>
+        window.addEventListener('message', function (event) {
+            if (event.data.type === 'download' && event.data.visualization === 'treemap') {
+                const svg = document.querySelector('svg');
+
+                // Download as SVG
+                if (event.data.format === 'svg') {
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const svgBlob = new Blob([data], { type: 'image/svg+xml;charset=utf-8' });
+                    const url = URL.createObjectURL(svgBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `covid19_${event.data.visualization}.svg`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else {
+                    // Download as PNG or JPEG
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const data = (new XMLSerializer()).serializeToString(svg);
+                    const DOMURL = window.URL || window.webkitURL || window;
+                    const img = new Image();
+                    const svgBlob = new Blob([data], { type: 'image/svg+xml;charset=utf-8' });
+                    const url = DOMURL.createObjectURL(svgBlob);
+
+                    img.onload = function () {
+                        canvas.width = svg.getBoundingClientRect().width;
+                        canvas.height = svg.getBoundingClientRect().height;
+
+                        // For JPEG, fill white background
+                        if (event.data.format === 'jpeg') {
+                            ctx.fillStyle = 'white';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        }
+
+                        ctx.drawImage(img, 0, 0);
+                        DOMURL.revokeObjectURL(url);
+
+                        const imgUrl = canvas.toDataURL(`image/${event.data.format}`);
+                        const a = document.createElement('a');
+                        a.href = imgUrl;
+                        a.download = `covid19_${event.data.visualization}.${event.data.format}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    };
+                    img.src = url;
+                }
+            }
+        });
+    </script>
+</head>
+
+<body>
+    <!-- Filter dropdown for showing different levels of the hierarchy -->
+    <div class="filters">
+        <label>Show Level:
+            <select id="levelFilter" class="filter-select">
+                <option value="all">All Levels</option>
+                <option value="1">Provinces</option>
+                <option value="2">Cities</option>
+            </select>
+        </label>
+    </div>
+    <!-- Breadcrumb navigation for hierarchical navigation -->
+    <div class="breadcrumb" id="breadcrumb">
+        <span data-depth="0">Root</span>
+    </div>
+    <!-- Container for the tree map -->
+    <svg id="treeMap" width="700" height="500"></svg>
+    <!-- Tooltip to display node information -->
+    <div id="tooltip" style="opacity: 0;"></div>
+
+    <script>
+        // Set dimensions and spacing for the visualization
+        const width = 700;
+        const height = 600;
+        const legendWidth = 150;
+
+        // Create the main SVG element
+        const svg = d3.select("#treeMap")
+            .attr("width", width + legendWidth)
+            .attr("height", height);
+
+        // Group for the tree map elements
+        const treemapGroup = svg.append("g");
+
+        // Group for the legend
+        const legend = svg.append("g")
+            .attr("class", "legend")
+            .attr("transform", `translate(${width + 10}, 20)`);
+
+        // Color scale for provinces
+        const provinceColor = d3.scaleOrdinal()
+            .range(['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
+                '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4']);
+
+        // Rainbow color interpolator for cities
+        const rainbowInterpolator = d3.interpolateRainbow;
+
+        let root; // Root node of the hierarchy
+        let currentNode = null; // Currently visible node
+        const breadcrumbHistory = []; // History for breadcrumb navigation
+
+        // Load the CSV file containing the data
+        d3.csv("covid_proj_dataset.csv").then(data => {
+            const hierarchyData = buildHierarchy(data);
+
+            // Create a hierarchical structure
+            root = d3.hierarchy(hierarchyData)
+                .sum(d => d.value || 0) // Aggregate values for sizing
+                .sort((a, b) => b.value - a.value); // Sort by value
+
+            // Generate the tree map layout
+            const treemap = d3.treemap()
+                .size([width, height])
+                .paddingInner(1);
+
+            treemap(root); // Apply the layout to the root node
+            currentNode = root; // Initialize the current node
+            renderTreeMap(root); // Render the tree map
+        });
+
+        // Function to render the tree map
+        function renderTreeMap(node) {
+            currentNode = node; // Update the current node
+            updateBreadcrumb(node); // Update breadcrumb navigation
+
+            // Create a tree map layout for the current node
+            const treemap = d3.treemap()
+                .size([width, height])
+                .paddingInner(1);
+
+            // Generate a local hierarchy for the current node
+            const localRoot = d3.hierarchy(node.data)
+                .sum(d => d.value || 0)
+                .sort((a, b) => b.value - a.value);
+
+            treemap(localRoot); // Apply the layout
+
+            // Filter descendants based on the selected level
+            const levelFilter = document.getElementById("levelFilter").value;
+            let filteredDescendants = localRoot.descendants().filter(d => {
+                if (levelFilter === "all") return true;
+                return d.depth <= parseInt(levelFilter);
+            });
+
+            // Clear previous nodes and labels
+            treemapGroup.selectAll(".node").remove();
+            svg.selectAll(".label").remove();
+
+            // Tooltip setup for node interaction
+            const tooltip = d3.select("#tooltip");
+
+            // Render the rectangles representing nodes
+            const nodes = treemapGroup.selectAll(".node")
+                .data(filteredDescendants)
+                .join("rect")
+                .attr("class", "node")
+                .attr("x", d => d.x0)
+                .attr("y", d => d.y0)
+                .attr("width", d => d.x1 - d.x0)
+                .attr("height", d => d.y1 - d.y0)
+                .attr("fill", d => {
+                    // Determine the fill color based on depth and level filter
+                    if (d.depth === 0) return "#fff";
+                    const levelFilter = document.getElementById("levelFilter").value;
+
+                    if (levelFilter === "2") {
+                        // Use rainbow gradient for cities
+                        if (d.depth === 2) {
+                            const cities = filteredDescendants.filter(node => node.depth === 2);
+                            const index = cities.indexOf(d);
+                            return rainbowInterpolator(index / (cities.length - 1));
+                        }
+                        return "#fff";
+                    } else {
+                        // Use province colors otherwise
+                        let province = d;
+                        while (province.depth > 1) {
+                            province = province.parent;
+                        }
+                        return provinceColor(province.data.name);
+                    }
+                })
+                .style("opacity", d => {
+                    // Adjust opacity based on the node depth
+                    const levelFilter = document.getElementById("levelFilter").value;
+                    if (levelFilter === "2") {
+                        return d.depth === 2 ? 0.8 : 0.6;
+                    }
+                    return d.depth === 1 ? 0.8 : 0.6;
+                })
+                .on("mouseover", (event, d) => {
+                    // Display tooltip on mouseover
+                    const levelFilter = document.getElementById("levelFilter").value;
+                    let tooltipContent = `Confirmed Cases: ${d.value.toLocaleString()}`;
+
+                    if (levelFilter === "2" && d.depth === 2) {
+                        let province = d;
+                        while (province.depth > 1) {
+                            province = province.parent;
+                        }
+                        tooltipContent = `Province: ${province.data.name}<br>${tooltipContent}`;
+                    } else if (levelFilter === "1" && currentNode.depth > 0) {
+                        let province = currentNode;
+                        while (province.depth > 1) {
+                            province = province.parent;
+                        }
+                        tooltipContent = `Province: ${province.data.name}<br>${tooltipContent}`;
+                    }
+
+                    tooltip
+                        .style("opacity", 1)
+                        .html(tooltipContent)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mousemove", (event) => {
+                    // Move tooltip with the mouse
+                    tooltip
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", () => {
+                    // Hide tooltip when the mouse leaves the node
+                    tooltip.style("opacity", 0);
+                })
+                .on("click", (event, d) => {
+                    // Drill down into the selected node
+                    if (d.children && d.children.length > 0) {
+                        renderTreeMap(node.descendants().find(n => n.data === d.data));
+                    }
+                });
+
+            // Add text labels to nodes
+            treemapGroup.selectAll(".label")
+                .data(filteredDescendants)
+                .join("text")
+                .attr("class", "label")
+                .attr("x", d => (d.x0 + d.x1) / 2)
+                .attr("y", d => (d.y0 + d.y1) / 2)
+                .attr("text-anchor", "middle")
+                .attr("dominant-baseline", "middle")
+                .attr("fill", "black")
+                .style("font-size", d => {
+                    const width = d.x1 - d.x0;
+                    const height = d.y1 - d.y0;
+                    return Math.min(width / 10, height / 2, 14) + "px";
+                })
+                .style("display", d => {
+                    // Determine whether to show the label based on size and depth
+                    if (d.depth === 0) return "none";
+                    const levelFilter = document.getElementById("levelFilter").value;
+                    if (d.depth === 1 && levelFilter !== "1") return "none";
+                    if (d.depth === 2 && levelFilter === "1") return "none";
+                    const width = d.x1 - d.x0;
+                    const height = d.y1 - d.y0;
+                    return width < 30 || height < 15 ? "none" : "block";
+                })
+                .text(d => {
+                    // Truncate label text if it exceeds the node's width
+                    if (d.depth === 0) return "";
+                    const levelFilter = document.getElementById("levelFilter").value;
+                    if (d.depth === 1 && levelFilter !== "1") return "";
+                    if (d.depth === 2 && levelFilter === "1") return "";
+                    const width = d.x1 - d.x0;
+                    const text = d.data.name;
+                    const maxLength = Math.floor(width / 5);
+                    if (text.length * 5 > width) {
+                        return text.substring(0, maxLength) + "...";
+                    }
+                    return text;
+                });
+
+            // Update the legend based on visible nodes
+            updateLegend(levelFilter, filteredDescendants);
+        }
+
+        // Build a hierarchical structure from the CSV data
+        function buildHierarchy(data) {
+            const root = { name: "Root", children: [] };
+
+            data.forEach(row => {
+                const path = row["hierarchy_province_city"].split(">");
+                if (path[path.length - 1].includes("Unknown")) return;
+
+                const value = +row["confirmed"];
+                let currentNode = root;
+
+                path.forEach((name, index) => {
+                    let childNode = currentNode.children.find(c => c.name === name);
+                    if (!childNode) {
+                        childNode = { name, children: [] };
+                        currentNode.children.push(childNode);
+                    }
+                    if (index === path.length - 1) {
+                        childNode.value = (childNode.value || 0) + value;
+                    }
+                    currentNode = childNode;
+                });
+            });
+
+            return root;
+        }
+
+        // Update breadcrumb navigation based on the current node
+        function updateBreadcrumb(node) {
+            const breadcrumb = d3.select("#breadcrumb");
+            breadcrumbHistory.length = node.depth;
+            breadcrumbHistory[node.depth] = node;
+
+            breadcrumb.html("");
+            const path = [];
+            let current = node;
+            while (current) {
+                path.unshift(current);
+                current = current.parent;
+            }
+            path.forEach((d, i) => {
+                if (i > 0) {
+                    breadcrumb.append("span")
+                        .text(" > ");
+                }
+                breadcrumb.append("span")
+                    .style("cursor", "pointer")
+                    .style("color", "#4363d8")
+                    .text(d.data.name)
+                    .on("click", () => renderTreeMap(d));
+            });
+        }
+
+        // Add event listener for level selection dropdown
+        document.getElementById("levelFilter").addEventListener("change", () => {
+            currentNode = root; // Reset to root when changing levels
+            renderTreeMap(root);
+        });
+
+        // Update the legend to match the visible nodes
+        function updateLegend(levelFilter, filteredDescendants) {
+            legend.selectAll("*").remove();
+
+            legend.append("text")
+                .attr("x", 0)
+                .attr("y", 0)
+                .attr("font-size", "13px")
+                .attr("font-weight", "bold")
+                .text(() => {
+                    if (levelFilter === "2") return "Cities by Case Count";
+                    if (levelFilter === "1") {
+                        if (currentNode.depth > 0) return "Cities";
+                        return "Provinces";
+                    }
+                    return "All Levels";
+                });
+
+            if (levelFilter === "2") {
+                const gradientId = "cityGradient";
+                const gradient = legend.append("defs")
+                    .append("linearGradient")
+                    .attr("id", gradientId)
+                    .attr("x1", "0%")
+                    .attr("y1", "0%")
+                    .attr("x2", "0%")
+                    .attr("y2", "100%");
+
+                const steps = 10;
+                for (let i = 0; i <= steps; i++) {
+                    gradient.append("stop")
+                        .attr("offset", `${(i * 100) / steps}%`)
+                        .attr("stop-color", rainbowInterpolator(i / steps));
+                }
+
+                legend.append("rect")
+                    .attr("width", 20)
+                    .attr("height", 500)
+                    .attr("y", 20)
+                    .style("fill", `url(#${gradientId})`);
+
+                const values = filteredDescendants
+                    .filter(d => d.depth === 2)
+                    .map(d => d.value);
+                const minValue = d3.min(values);
+                const maxValue = d3.max(values);
+
+                legend.append("text")
+                    .attr("x", 25)
+                    .attr("y", 30)
+                    .attr("font-size", "13px")
+                    .text(`Max: ${maxValue?.toLocaleString()}`);
+
+                legend.append("text")
+                    .attr("x", 25)
+                    .attr("y", 520)
+                    .attr("font-size", "13px")
+                    .text(`Min: ${minValue?.toLocaleString()}`);
+            } else {
+                const visibleParents = new Set(filteredDescendants
+                    .filter(d => d.depth === 1)
+                    .map(d => d.data.name));
+
+                const legendItems = legend.selectAll(".legend-item")
+                    .data(Array.from(visibleParents))
+                    .join("g")
+                    .attr("class", "legend-item")
+                    .attr("transform", (d, i) => `translate(0, ${i * 25 + 20})`);
+
+                legendItems.append("rect")
+                    .attr("width", 15)
+                    .attr("height", 15)
+                    .attr("fill", d => provinceColor(d));
+
+                legendItems.append("text")
+                    .attr("x", 20)
+                    .attr("y", 12)
+                    .text(d => d);
+            }
+        }
+    </script>
+</body>
+
+</html>
