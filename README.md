@@ -28,7 +28,7 @@ This project aims to provide an interactive and informative dashboard for visual
 To run the visualizations locally, clone the repository and open the `dashboard.html` file in a web browser. Ensure you have a local server running to avoid CORS issues with loading data files.
 
 ```bash
-git clone
+git clone https://github.com/mohammad-malik/covid-visualizations-d3.git
 cd covid-visualizations
 open index.html
 ```
